@@ -4,6 +4,7 @@ require 'uuid4r'
 require 'active_support'
 require 'active_support/core_ext'
 require 'redis'
+require 'set'
 
 module Beetle
 

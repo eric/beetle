@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
   s.name    = "beetle"
-  s.version = "0.2.12"
-  s.required_rubygems_version = ">= 1.3.1"
+  s.version = "0.2.14"
+  s.required_rubygems_version = ">= 1.3.7"
   s.authors            = ["Stefan Kaes", "Pascal Friederich", "Ali Jelveh", "Sebastian Roebke"]
   s.date               = Time.now.strftime('%Y-%m-%d')
   s.default_executable = "beetle"
@@ -28,15 +28,18 @@ Gem::Specification.new do |s|
   INFO
 
   s.specification_version = 3
-  s.add_runtime_dependency("uuid4r",                [">= 0.1.1"])
+  s.add_runtime_dependency("uuid4r",                [">= 0.1.2"])
   s.add_runtime_dependency("bunny",                 ["= 0.6.0"])
-  s.add_runtime_dependency("bunny-ext",             [">= 0.6.5"])
-  s.add_runtime_dependency("redis",                 [">= 2.0.4", "<= 2.2.0"])
+  s.add_runtime_dependency("bunny-ext",             [">= 0.6.6"])
+  s.add_runtime_dependency("redis",                 [">= 2.0.4", "<= 2.2.1"])
   s.add_runtime_dependency("amqp",                  ["~> 0.6.7"])
-  s.add_runtime_dependency("activesupport",         ["~> 2.3.4"])
+  s.add_runtime_dependency("activesupport",         [">= 2.3.4"])
   s.add_runtime_dependency("daemons",               [">= 1.0.10"])
+  s.add_development_dependency("rake",              [">= 0.8.7"])
   s.add_development_dependency("mocha",             [">= 0"])
   s.add_development_dependency("rcov",              [">= 0"])
+  s.add_development_dependency("redgreen",          [">= 0"])
+  s.add_development_dependency("wirble",            [">= 0"])
   s.add_development_dependency("cucumber",          [">= 0.7.2"])
   s.add_development_dependency("daemon_controller", [">= 0"])
 end

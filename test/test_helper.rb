@@ -1,10 +1,13 @@
 require 'rubygems'
-require 'active_support'
-require 'active_support/testing/declarative'
 require 'test/unit'
+require 'mocha'
+require 'active_support/testing/declarative'
+
+require File.expand_path(File.dirname(__FILE__) + '/../lib/beetle')
+
 begin
   require 'redgreen' unless ENV['TM_FILENAME']
-rescue MissingSourceFile
+rescue LoadError => e
 end
 
 # we can remove this hack which is needed only for testing
@@ -17,8 +20,6 @@ rescue LoadError
   end
 end
 
-require 'mocha'
-require File.expand_path(File.dirname(__FILE__) + '/../lib/beetle')
 
 class Test::Unit::TestCase
   extend ActiveSupport::Testing::Declarative

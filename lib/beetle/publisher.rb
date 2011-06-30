@@ -16,7 +16,7 @@ module Beetle
         Bunny::ConnectionError, Bunny::ForcedChannelCloseError, Bunny::ForcedConnectionCloseError,
         Bunny::MessageError, Bunny::ProtocolError, Bunny::ServerDownError, Bunny::UnsubscribeError,
         Bunny::AcknowledgementError, Qrack::BufferOverflowError, Qrack::InvalidTypeError,
-        Errno::EHOSTUNREACH, Errno::ECONNRESET, Qrack::ConnectionTimeout
+        Errno::EHOSTUNREACH, Errno::ECONNRESET, Timeout::Error
       ]
     end
 
@@ -210,7 +210,7 @@ module Beetle
           end
         end
       rescue Exception => e
-        logger.error "Beetle: error closing down bunny #{e}"
+        logger.warn "Beetle: error closing down bunny #{e}"
         Beetle::reraise_expectation_errors!
       ensure
         @bunnies[@server] = nil
