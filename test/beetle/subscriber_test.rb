@@ -27,7 +27,7 @@ module Beetle
       m = mock("dummy")
       expected_amqp_options = {
         :host => @sub.send(:current_host), :port => @sub.send(:current_port),
-        :user => "guest", :pass => "guest", :vhost => "/"
+        :user => "guest", :pass => "guest", :vhost => "/", :logging => false
       }
       AMQP.expects(:connect).with(expected_amqp_options).returns(m)
       # TODO: smarter way to test? what triggers the amqp_connection private method call?
@@ -52,6 +52,75 @@ module Beetle
       @sub.instance_variable_set "@amqp_connections", [["server1", connection1], ["server2",connection2]]
       EM.expects(:stop_event_loop)
       @sub.send(:stop!)
+    end
+
+  end
+
+  class SubscriberPauseAndResumeTest < Test::Unit::TestCase
+    def setup
+      @client = Client.new
+      @sub = @client.send(:subscriber)
+      @sub.servers << "localhost:7777"
+      @server1, @server2 = @sub.servers
+      @client.register_message(:a)
+      @client.register_queue(:a)
+      @client.register_handler(%W(a)){}
+    end
+
+    test "should pause on all servers when a handler has been registered" do
+      @sub.expects(:pause).with("a").times(2)
+      @sub.stubs(:has_subscription?).returns(true)
+      @sub.pause_listening(%w(a))
+    end
+
+    test "should resume on all servers when a handler has been registered" do
+      @sub.expects(:resume).with("a").times(2)
+      @sub.stubs(:has_subscription?).returns(true)
+      @sub.resume_listening(%w(a))
+    end
+
+    test "should pause on no servers when no handler has been registered" do
+      @sub.expects(:pause).never
+      @sub.stubs(:has_subscription?).returns(false)
+      @sub.pause_listening(%w(a))
+    end
+
+    test "should resume on no servers when no handler has been registered" do
+      @sub.expects(:resume).never
+      @sub.stubs(:has_subscription?).returns(false)
+      @sub.resume_listening(%w(a))
+    end
+
+    test "pausing a single queue should call amqp unsubscribe" do
+      q = mock("queue a")
+      q.expects(:subscribed?).returns(true)
+      q.expects(:unsubscribe)
+      @sub.stubs(:queues).returns({"a" =>q})
+      @sub.__send__(:pause, "a")
+    end
+
+    test "pausing a single queue which is already paused should not call amqp unsubscribe" do
+      q = mock("queue a")
+      q.expects(:subscribed?).returns(false)
+      q.expects(:unsubscribe).never
+      @sub.stubs(:queues).returns({"a" =>q})
+      @sub.__send__(:pause, "a")
+    end
+
+    test "resuming a single queue should call amqp subscribe" do
+      q = mock("queue a")
+      q.expects(:subscribed?).returns(false)
+      q.expects(:subscribe)
+      @sub.stubs(:queues).returns({"a" =>q})
+      @sub.__send__(:resume, "a")
+    end
+
+    test "resuming a single queue which is already subscribed should not call amqp subscribe" do
+      q = mock("queue a")
+      q.expects(:subscribed?).returns(true)
+      q.expects(:subscribe).never
+      @sub.stubs(:queues).returns({"a" =>q})
+      @sub.__send__(:resume, "a")
     end
 
   end
@@ -160,6 +229,8 @@ module Beetle
       @sub = client.send(:subscriber)
       @exception = Exception.new "murks"
       @handler = Handler.create(lambda{|*args| raise @exception})
+      # handler method 'processing_completed' should be called under all circumstances
+      @handler.expects(:processing_completed).once
       @callback = @sub.send(:create_subscription_callback, "my myessage", @queue, @handler, :exceptions => 1)
     end
 
@@ -225,7 +296,7 @@ module Beetle
       @sub.send(:subscribe_queues, %W(a b))
     end
 
-    test "subscribe should subscribe with a subscription callback created from the registered block" do
+    test "subscribe should subscribe with a subscription callback created from the registered block and remember the subscription" do
       @client.register_queue(:some_queue, :exchange => "some_exchange", :key => "some_key")
       server = @sub.server
       header = header_with_params({})
@@ -239,17 +310,21 @@ module Beetle
       end
       @sub.register_handler("some_queue", &proc)
       q = mock("QUEUE")
-      q.expects(:subscribe).with({:ack => true, :key => "#"}).yields(header, "foo")
-      @sub.expects(:queues).returns({"some_queue" => q})
+      subscription_options = {:ack => true, :key => "#"}
+      q.expects(:subscribe).with(subscription_options).yields(header, "foo")
+      @sub.expects(:queues).returns({"some_queue" => q}).twice
       @sub.send(:subscribe, "some_queue")
       assert block_called
+      assert @sub.__send__(:has_subscription?, "some_queue")
+      q.expects(:subscribe).with(subscription_options).raises(MQ::Error)
+      assert_raises(Error) { @sub.send(:subscribe, "some_queue") }
     end
 
     test "subscribe should fail if no handler exists for given message" do
       assert_raises(Error){ @sub.send(:subscribe, "some_queue") }
     end
 
-    test "listeninging on queues should use eventmachine. create exchanges. bind queues. install subscribers. and yield." do
+    test "listening on queues should use eventmachine. create exchanges. bind queues. install subscribers. and yield." do
       @client.register_exchange(:an_exchange)
       @client.register_queue(:a_queue, :exchange => :an_exchange)
       @client.register_message(:a_message, :key => "foo", :exchange => :an_exchange)

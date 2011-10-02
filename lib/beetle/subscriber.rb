@@ -12,6 +12,7 @@ module Beetle
       @handlers = {}
       @amqp_connections = {}
       @mqs = {}
+      @subscriptions = {}
     end
 
     # the client calls this method to subscribe to a list of queues.
@@ -32,6 +33,17 @@ module Beetle
       end
     end
 
+    def pause_listening(queues)
+      each_server do
+        queues.each { |name| pause(name) if has_subscription?(name) }
+      end
+    end
+
+    def resume_listening(queues)
+      each_server do
+        queues.each { |name| resume(name) if has_subscription?(name) }
+      end
+    end
 
     # closes all AMQP connections and stops the eventmachine loop
     def stop! #:nodoc:
@@ -39,6 +51,7 @@ module Beetle
         EM.stop_event_loop
       else
         server, connection = @amqp_connections.shift
+        logger.debug "Beetle: closing connection to #{server}"
         connection.close { stop! }
       end
     end
@@ -54,10 +67,6 @@ module Beetle
 
     def exchanges_for_queues(queues)
       @client.bindings.slice(*queues).map{|_, opts| opts.map{|opt| opt[:exchange]}}.flatten.uniq
-    end
-
-    def exchanges_for_messages(messages)
-      @client.messages.slice(*messages).map{|_, opts| opts[:exchange]}.uniq
     end
 
     def queues_for_exchanges(exchanges)
@@ -91,24 +100,46 @@ module Beetle
       @mqs[server] ||= MQ.new(amqp_connection).prefetch(1)
     end
 
+    def subscriptions(server=@server)
+      @subscriptions[server] ||= {}
+    end
+
+    def has_subscription?(name)
+      subscriptions.include?(name)
+    end
+
     def subscribe(queue_name)
       error("no handler for queue #{queue_name}") unless @handlers.include?(queue_name)
       opts, handler = @handlers[queue_name]
       queue_opts = @client.queues[queue_name][:amqp_name]
       amqp_queue_name = queue_opts
       callback = create_subscription_callback(queue_name, amqp_queue_name, handler, opts)
+      keys = opts.slice(*SUBSCRIPTION_KEYS).merge(:key => "#", :ack => true)
       logger.debug "Beetle: subscribing to queue #{amqp_queue_name} with key # on server #{@server}"
       begin
-        queues[queue_name].subscribe(opts.slice(*SUBSCRIPTION_KEYS).merge(:key => "#", :ack => true), &callback)
+        queues[queue_name].subscribe(keys, &callback)
+        subscriptions[queue_name] = [keys, callback]
       rescue MQ::Error
         error("Beetle: binding multiple handlers for the same queue isn't possible.")
       end
+    end
+
+    def pause(queue_name)
+      return unless queues[queue_name].subscribed?
+      queues[queue_name].unsubscribe
+    end
+
+    def resume(queue_name)
+      return if queues[queue_name].subscribed?
+      keys, callback = subscriptions[queue_name]
+      queues[queue_name].subscribe(keys, &callback)
     end
 
     def create_subscription_callback(queue_name, amqp_queue_name, handler, opts)
       server = @server
       lambda do |header, data|
         begin
+          # logger.debug "Beetle: received message"
           processor = Handler.create(handler, opts)
           message_options = opts.merge(:server => server, :store => @client.deduplication_store)
           m = Message.new(amqp_queue_name, header, data, message_options)
@@ -124,10 +155,14 @@ module Beetle
             exchange = MQ::Exchange.new(mq(server), :direct, "", :key => reply_to)
             exchange.publish(m.handler_result.to_s, :headers => {:status => status})
           end
+          # logger.debug "Beetle: processed message"
         rescue Exception
           Beetle::reraise_expectation_errors!
           # swallow all exceptions
           logger.error "Beetle: internal error during message processing: #{$!}: #{$!.backtrace.join("\n")}"
+        ensure
+          # processing_completed swallows all exceptions, so we don't need to protect this call
+          processor.processing_completed
         end
       end
     end
@@ -149,7 +184,7 @@ module Beetle
 
     def new_amqp_connection
       # FIXME: wtf, how to test that reconnection feature....
-      con = AMQP.connect(:host => current_host, :port => current_port,
+      con = AMQP.connect(:host => current_host, :port => current_port, :logging => false,
                          :user => Beetle.config.user, :pass => Beetle.config.password, :vhost => Beetle.config.vhost)
       con.instance_variable_set("@on_disconnect", proc{ con.__send__(:reconnect) })
       con
